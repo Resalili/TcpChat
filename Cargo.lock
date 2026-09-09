@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "TspChat"
+name = "TcpChat"
 version = "0.1.0"
 dependencies = [
  "crossterm",

@@ -1,6 +1,7 @@
 use crate::protocol::{Announce,encode_announce,decode_announce};
 use tokio::net::UdpSocket;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 pub async fn setup_broadcast_soket(port: u16) -> std::io::Result<UdpSocket> {
     let soket = UdpSocket::bind(("0.0.0.0", port)).await?;
@@ -15,7 +16,7 @@ pub async fn announce(soket: &UdpSocket, broadcast_port: u16, info: &Announce) -
     Ok(())
 }
 
-pub async fn listen_for_peers(soket: &UdpSocket) {
+pub async fn listen_for_peers(soket: Arc<UdpSocket>) {
     let mut buf = [0u8; 512];
     loop {
         match soket.recv_from(&mut buf).await {
