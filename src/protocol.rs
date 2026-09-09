@@ -10,10 +10,12 @@ pub fn encode_announce(a: &Announce) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.push(PACKET_ANNOUNCE);
     let name_bytes = a.nickname.as_bytes();
+
     buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
     buf.extend_from_slice(name_bytes);
     buf.extend_from_slice(&a.tcp_port.to_le_bytes());
     buf.push(a.status);
+
     buf
 }
 
@@ -21,12 +23,19 @@ pub fn decode_announce(data: &[u8]) -> Option<Announce> {
     if data.is_empty() || data[0] != PACKET_ANNOUNCE {
         return None;
     }
-    let name_len_bytes = &data[1..3];
+
+    let name_len_bytes = data.get(1..3)?;
     let name_len = u16::from_le_bytes(name_len_bytes.try_into().unwrap()) as usize;
-    let nickname = String::from_utf8(data[3..3 + name_len].to_vec()).unwrap();
-    let tcp_port = u16::from_le_bytes(data[3 + name_len..5 + name_len].try_into().unwrap());
-    let status = data[5 + name_len];
-    Some(Announce{nickname, tcp_port, status})
+
+    let name_bytes = data.get(3..3 + name_len)?;
+    let nickname = String::from_utf8(name_bytes.to_vec()).ok()?;
+
+    let port_bytes = data.get(3 + name_len..5 + name_len)?;
+    let tcp_port = u16::from_le_bytes(port_bytes.try_into().unwrap());
+
+    let status = *data.get(5 + name_len)?;
+
+    Some(Announce { nickname, tcp_port, status })
 }
 #[cfg(test)]
 mod tests {
