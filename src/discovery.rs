@@ -19,15 +19,22 @@ pub async fn announce(soket: &UdpSocket, broadcast_port: u16, info: &Announce) -
 
 
 
-pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>) {
+pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>, my_session_id: u64) {
     let mut buf = [0u8; 512];
     loop {
         match soket.recv_from(&mut buf).await {
             Ok((n, from)) => {
                 let data = &buf[..n];
                 if let Some(announce) = decode_announce(data) {
-                    let mut list = peers.lock().unwrap();
-                    list.update(announce.session_id, announce.nickname, from, announce.tcp_port, announce.status);
+                    let is_new = {
+                        let mut list = peers.lock().unwrap();
+                        list.update(announce.session_id, announce.nickname.clone(), from, announce.tcp_port, announce.status)
+                    };
+
+                    if is_new && my_session_id > announce.session_id {
+                        // TODO: ініціювати TCP-з'єднання до цього піра
+                        println!("Новий пір {}, я ініціюю з'єднання", announce.nickname);
+                    }
                 }
             }
             Err(e) => eprintln!("помилка recv_from: {e}"),

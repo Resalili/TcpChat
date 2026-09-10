@@ -61,7 +61,7 @@ async fn main() -> std::io::Result<()> {
     });
     let listen_socket = socket.clone();
     let listen_peers = peers.clone();
-    let listen_handle = tokio::spawn(discovery::listen_for_peers(listen_socket, listen_peers));
+    let listen_handle = tokio::spawn(discovery::listen_for_peers(listen_socket, listen_peers, session_id));
     
     let listener_handle = tokio::spawn(network::listener::run_server(tcp_port));
 

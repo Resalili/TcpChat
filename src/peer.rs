@@ -20,7 +20,8 @@ impl PeerList {
         PeerList { peers: HashMap::new() }
     }
 
-    pub fn update(&mut self,session_id: u64, nickname: String, addr: SocketAddr, tcp_port: u16, status: u8) {
+    pub fn update(&mut self,session_id: u64, nickname: String, addr: SocketAddr, tcp_port: u16, status: u8) -> bool {
+        let is_new = !self.peers.contains_key(&nickname);
         self.peers.insert(nickname.clone(), Peer {
             session_id,
             nickname,
@@ -29,6 +30,7 @@ impl PeerList {
             status,
             last_seen: Instant::now(),
         });
+        is_new
     }
 
     pub fn remove_stale(&mut self, timeout: std::time::Duration) {
