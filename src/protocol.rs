@@ -3,29 +3,30 @@ pub const PACKET_TEXT: u8 = 0x02;
 pub const PACKET_IMAGE: u8 = 0x03;
 
 pub struct Announce{
+    pub session_id: u64,
     pub nickname: String,
     pub tcp_port: u16,
     pub status: u8,
 }
 
-// [1] pakete type
-// [2] nickene lenth
+// [1] packet type
+// [8] session_id
+// [2] nickname length
 // [n] nickname
 // [2] tcp_port
 // [1] status
 
 
-
-
 pub fn encode_announce(a: &Announce) -> Vec<u8> {
     let mut buf = Vec::new();
-    buf.push(PACKET_ANNOUNCE);
+    buf.push(PACKET_ANNOUNCE); // 1 байт
+    buf.extend_from_slice(&a.session_id.to_le_bytes()); // 8 байтів
     let name_bytes = a.nickname.as_bytes();
 
-    buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes()); // 2 байти
     buf.extend_from_slice(name_bytes);
-    buf.extend_from_slice(&a.tcp_port.to_le_bytes());
-    buf.push(a.status);
+    buf.extend_from_slice(&a.tcp_port.to_le_bytes()); // 2 байти
+    buf.push(a.status); // 1 байт
 
     buf
 }
@@ -34,19 +35,21 @@ pub fn decode_announce(data: &[u8]) -> Option<Announce> {
     if data.is_empty() || data[0] != PACKET_ANNOUNCE {
         return None;
     }
+    let session_id_bytes = data.get(1..9)?;
+    let session_id = u64::from_le_bytes(session_id_bytes.try_into().unwrap());
 
-    let name_len_bytes = data.get(1..3)?;
+    let name_len_bytes = data.get(9..11)?;
     let name_len = u16::from_le_bytes(name_len_bytes.try_into().unwrap()) as usize;
 
-    let name_bytes = data.get(3..3 + name_len)?;
+    let name_bytes = data.get(11..11 + name_len)?;
     let nickname = String::from_utf8(name_bytes.to_vec()).ok()?;
 
-    let port_bytes = data.get(3 + name_len..5 + name_len)?;
+    let port_bytes = data.get(11 + name_len..13 + name_len)?;
     let tcp_port = u16::from_le_bytes(port_bytes.try_into().unwrap());
 
-    let status = *data.get(5 + name_len)?;
+    let status = *data.get(13 + name_len)?;
 
-    Some(Announce { nickname, tcp_port, status })
+    Some(Announce {session_id, nickname, tcp_port, status})
 }
 #[cfg(test)]
 mod tests {
@@ -55,6 +58,7 @@ mod tests {
     #[test]
     fn announce_encode_decode() {
         let announce = Announce {
+            session_id: 123,
             nickname: "Artem".to_string(),
             tcp_port: 8080,
             status: 1,
@@ -71,6 +75,7 @@ mod tests {
     fn announce_decoding() {
         let data = vec![
             0x01,
+            123, 0, 0, 0, 0, 0, 0, 0, // session_id = 123 (u64 le)
             0x03, 0x00,
             b'B', b'o', b'b',
             0x90, 0x1F,
@@ -79,13 +84,16 @@ mod tests {
 
         let announce = decode_announce(&data).unwrap();
 
+        assert_eq!(announce.session_id, 123);
         assert_eq!(announce.nickname, "Bob");
         assert_eq!(announce.tcp_port, 8080);
         assert_eq!(announce.status, 2);
     }
+
     #[test]
     fn announce_encoding() {
         let announce = Announce {
+            session_id: 123,
             nickname: "Bob".to_string(),
             tcp_port: 8080,
             status: 2,
@@ -96,13 +104,13 @@ mod tests {
         assert_eq!(
             encoded,
             vec![
-                0x01,       // packet type
-                0x03, 0x00, // nickname length
+                0x01,                      // packet type
+                123, 0, 0, 0, 0, 0, 0, 0,  // session_id (u64 le)
+                0x03, 0x00,                // nickname length
                 b'B', b'o', b'b',
-                0x90, 0x1F, // 8080 LE
-                0x02,       // status
+                0x90, 0x1F,                // 8080 LE
+                0x02,                      // status
             ]
         );
     }
 }
-

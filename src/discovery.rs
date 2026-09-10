@@ -27,7 +27,7 @@ pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>
                 let data = &buf[..n];
                 if let Some(announce) = decode_announce(data) {
                     let mut list = peers.lock().unwrap();
-                    list.update(announce.nickname, from, announce.tcp_port, announce.status);
+                    list.update(announce.session_id, announce.nickname, from, announce.tcp_port, announce.status);
                 }
             }
             Err(e) => eprintln!("помилка recv_from: {e}"),
@@ -54,6 +54,7 @@ mod tests {
         let receiver_addr = receiver.local_addr().unwrap();
 
         let info = Announce {
+            session_id: 42,
             nickname: "TestPeer".to_string(),
             tcp_port: 8080,
             status: 0,

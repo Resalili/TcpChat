@@ -27,15 +27,24 @@ fn register_user() -> (String, u16) {
     (nickname, tcp_port)
 }
 
+fn generate_session_id() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+    let pid = std::process::id() as u64;
+    nanos ^ pid
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let (nickname, tcp_port) = register_user();
+    let session_id = generate_session_id();
 
     let socket = discovery::setup_broadcast_soket(DISCOVERY_PORT).await?;
     let socket = Arc::new(socket);
     let peers = Arc::new(Mutex::new(PeerList::new()));
 
     let my_info = Announce {
+        session_id,
         nickname,
         tcp_port,
         status: 0,
