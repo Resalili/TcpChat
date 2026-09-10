@@ -1,9 +1,11 @@
 mod protocol;
 mod discovery;
 mod network;
+mod peer;
 
+use peer::PeerList;
 use protocol::Announce;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::io::{self, Write};
 
@@ -31,6 +33,7 @@ async fn main() -> std::io::Result<()> {
 
     let socket = discovery::setup_broadcast_soket(DISCOVERY_PORT).await?;
     let socket = Arc::new(socket);
+    let peers = Arc::new(Mutex::new(PeerList::new()));
 
     let my_info = Announce {
         nickname,
@@ -48,7 +51,9 @@ async fn main() -> std::io::Result<()> {
         }
     });
     let listen_socket = socket.clone();
-    let listen_handle = tokio::spawn(discovery::listen_for_peers(listen_socket));
+    let listen_peers = peers.clone();
+    let listen_handle = tokio::spawn(discovery::listen_for_peers(listen_socket, listen_peers));
+    
     let listener_handle = tokio::spawn(network::listener::run_server(tcp_port));
 
     let _ = tokio::join!(announce_handle, listen_handle, listener_handle);

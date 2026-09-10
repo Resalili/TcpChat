@@ -8,6 +8,15 @@ pub struct Announce{
     pub status: u8,
 }
 
+// [1] pakete type
+// [2] nickene lenth
+// [n] nickname
+// [2] tcp_port
+// [1] status
+
+
+
+
 pub fn encode_announce(a: &Announce) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.push(PACKET_ANNOUNCE);

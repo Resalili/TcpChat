@@ -1,7 +1,8 @@
 use crate::protocol::{Announce,encode_announce,decode_announce};
 use tokio::net::UdpSocket;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use crate::peer::PeerList;
 
 pub async fn setup_broadcast_soket(port: u16) -> std::io::Result<UdpSocket> {
     let soket = UdpSocket::bind(("0.0.0.0", port)).await?;
@@ -16,17 +17,19 @@ pub async fn announce(soket: &UdpSocket, broadcast_port: u16, info: &Announce) -
     Ok(())
 }
 
-pub async fn listen_for_peers(soket: Arc<UdpSocket>) {
+
+
+pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>) {
     let mut buf = [0u8; 512];
     loop {
         match soket.recv_from(&mut buf).await {
             Ok((n, from)) => {
                 let data = &buf[..n];
                 if let Some(announce) = decode_announce(data) {
-                    println!("Пір {} на {} слухає TCP-порт {}", announce.nickname, from, announce.tcp_port);
-                    // TODO: оновлення списку відомих пірів (peer.rs)
+                    let mut list = peers.lock().unwrap();
+                    list.update(announce.nickname, from, announce.tcp_port, announce.status);
                 }
-            },
+            }
             Err(e) => eprintln!("помилка recv_from: {e}"),
         }
     }
