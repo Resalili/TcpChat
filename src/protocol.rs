@@ -21,6 +21,7 @@ pub fn encode_announce(a: &Announce) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.push(PACKET_ANNOUNCE); // 1 байт
     buf.extend_from_slice(&a.session_id.to_le_bytes()); // 8 байтів
+    
     let name_bytes = a.nickname.as_bytes();
 
     buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes()); // 2 байти
