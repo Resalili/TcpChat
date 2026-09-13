@@ -85,7 +85,9 @@ pub async fn run(mut event_rx: mpsc::Receiver<AppEvent>, manager: Arc<Connection
         tokio::select! {
             Some(Ok(term_event)) = key_events.next() => {
                 if let CEvent::Key(key) = term_event {
-                    handle_key(&mut app, key.code, &manager).await;
+                    if key.kind == crossterm::event::KeyEventKind::Press {
+                        handle_key(&mut app, key.code, &manager).await;
+                    }
                 }
                 // CEvent::Resize/Mouse/FocusGained тощо — нічого не робимо всередині,
                 // але сам факт спрацювання цієї гілки select! призведе до нового terminal.draw() на початку циклу

@@ -68,13 +68,20 @@ async fn send_packet(socket: &mut TcpStream, packet_type: u8, body: &[u8]) -> st
 pub async fn handle_connection(mut socket: TcpStream, peer_nickname: String, manager: Arc<ConnectionManager>) {
     let (tx, mut rx) = mpsc::channel::<String>(32);
     manager.add(peer_nickname.clone(), tx);
+    crate::info!("зареєстровано з'єднання з {peer_nickname}");
 
     loop {
         tokio::select! {
             result = read_packet(&mut socket) => {
                 match result {
-                    Ok(Some(IncomingPacket::Text(text))) => crate::info!("{peer_nickname}: {text}"),
+                    Ok(Some(IncomingPacket::Text(text))) => {
+                        manager.send_event(crate::ui::AppEvent::IncomingText {
+                            from: peer_nickname.clone(),
+                            text,
+                        });
+                    }
                     Ok(Some(IncomingPacket::Image(bytes))) => crate::info!("{peer_nickname} надіслав фото, {} байтів", bytes.len()),
+
                     Ok(Some(IncomingPacket::Hello(_))) => { /* повторний hello під час сесії — ігноруємо */ }
                     Ok(None) => { crate::info!("{peer_nickname} відключився"); break; }
                     Err(e) => { crate::error!("помилка читання від {peer_nickname}: {e}"); break; }
@@ -107,6 +114,7 @@ pub async fn connect_to_peer(
     manager: Arc<ConnectionManager>,
 ) -> std::io::Result<()> {
     let mut socket = TcpStream::connect(addr).await?;
+    crate::info!("TCP-з'єднання встановлено до {addr}");
     send_hello(&mut socket, &my_nickname).await?;
     tokio::spawn(handle_connection(socket, peer_nickname, manager));
     Ok(())
