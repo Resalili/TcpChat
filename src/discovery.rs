@@ -45,7 +45,8 @@ pub async fn listen_for_peers(
                     }
 
                     if is_new && my_session_id > announce.session_id {
-                        let addr = SocketAddr::new(from.ip(), announce.tcp_port);
+                        let addr = SocketAddr::new(from.ip(), announce.tcp_port);       
+                        crate::info!("ініціюю з'єднання до {} ({addr})", announce.nickname);
                         let peer_nickname = announce.nickname.clone();
                         let my_nick = my_nickname.clone();
                         let mgr = connections.clone();
