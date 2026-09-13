@@ -57,18 +57,19 @@ async fn main() -> std::io::Result<()> {
     let (event_tx, event_rx) = mpsc::channel::<AppEvent>(64);
     let manager = Arc::new(network::ConnectionManager::new(event_tx));
 
-    let my_info = Announce {
-        session_id,
-        nickname: nickname.clone(), // клонуємо: nickname ще знадобиться нижче для listen_for_peers
-        tcp_port,
-        status: 0,
-    };
-
     let announce_socket = socket.clone();
+    let announce_status = my_status.clone();
+    let announce_nickname = nickname.clone();
     let announce_handle = tokio::spawn(async move {
         loop {
-            let status = my_status.load(Ordering::Relaxed);
-            if let Err(e) = discovery::announce(&announce_socket, DISCOVERY_PORT, &my_info).await {
+            let status = announce_status.load(Ordering::Relaxed);
+            let info = Announce {
+                session_id,
+                nickname: announce_nickname.clone(),
+                tcp_port,
+                status,
+            };
+            if let Err(e) = discovery::announce(&announce_socket, DISCOVERY_PORT, &info).await {
                 crate::error!("помилка announce: {e}");
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -85,8 +86,9 @@ async fn main() -> std::io::Result<()> {
     let listener_handle = tokio::spawn(network::listener::run_server(tcp_port, manager.clone()));
 
     let ui_manager = manager.clone();
+    let ui_status = my_status.clone();
     let ui_handle = tokio::spawn(async move {
-        if let Err(e) = ui::run(event_rx, ui_manager).await {
+        if let Err(e) = ui::run(event_rx, ui_manager, ui_status).await {
             crate::error!("помилка UI: {e}");
         }
     });
@@ -98,12 +100,12 @@ async fn main() -> std::io::Result<()> {
             tokio::time::sleep(Duration::from_secs(10)).await;
             let removed = stale_peers.lock().unwrap().remove_stale(Duration::from_secs(15));
             for nick in removed {
-                info!("пір {nick} зник (немає анонсів)");
+                crate::info!("пір {nick} зник (немає анонсів)");
                 stale_manager.send_event(crate::ui::AppEvent::PeerLeft(nick));
             }
         }
     });
 
-    let _ = tokio::join!(announce_handle, listen_handle, listener_handle, ui_handle,  stale_handle);
+    let _ = tokio::join!(announce_handle, listen_handle, listener_handle, ui_handle, stale_handle);
     Ok(())
 }
