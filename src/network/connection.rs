@@ -1,10 +1,17 @@
+use std::sync::Arc;
+use std::net::SocketAddr;
+
+use tokio::sync::mpsc;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use crate::protocol::{PACKET_TEXT, PACKET_IMAGE};
+
+use crate::protocol::{PACKET_TEXT, PACKET_IMAGE, PACKET_HELLO};
+use crate::network::ConnectionManager;
 
 pub enum IncomingPacket {
     Text(String),
     Image(Vec<u8>), // сирі байти фото — розбереш формат (PNG/JPEG), коли дійдеш до цього
+    Hello(String)
 }
 
 async fn read_packet(socket: &mut TcpStream) -> std::io::Result<Option<IncomingPacket>> {
@@ -24,6 +31,11 @@ async fn read_packet(socket: &mut TcpStream) -> std::io::Result<Option<IncomingP
     socket.read_exact(&mut body).await?;
 
     match packet_type {
+        PACKET_HELLO => {
+            let nickname = String::from_utf8(body)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "невалідний utf8 в hello"))?;
+            Ok(Some(IncomingPacket::Hello(nickname)))
+        }
         PACKET_TEXT => {
             let text = String::from_utf8(body).unwrap_or_default();
             Ok(Some(IncomingPacket::Text(text)))
@@ -34,6 +46,9 @@ async fn read_packet(socket: &mut TcpStream) -> std::io::Result<Option<IncomingP
             Ok(None) // або продовжити цикл і читати наступний пакет — залежно від бажаної поведінки
         }
     }
+}
+pub async fn send_hello(socket: &mut TcpStream, nickname: &str) -> std::io::Result<()> {
+    send_packet(socket, PACKET_HELLO, nickname.as_bytes()).await
 }
 
 pub async fn send_text(socket: &mut TcpStream, text: &str) -> std::io::Result<()> {
@@ -50,30 +65,52 @@ async fn send_packet(socket: &mut TcpStream, packet_type: u8, body: &[u8]) -> st
     socket.write_all(body).await?;
     Ok(())
 }
+pub async fn handle_connection(mut socket: TcpStream, peer_nickname: String, manager: Arc<ConnectionManager>) {
+    let (tx, mut rx) = mpsc::channel::<String>(32);
+    manager.add(peer_nickname.clone(), tx);
 
-pub async fn handle_connection(mut socket: TcpStream) {
     loop {
-        match read_packet(&mut socket).await {
-            Ok(Some(IncomingPacket::Text(text))) => {
-                println!("текст: {text}");
-                // TODO: передати в UI через mpsc
+        tokio::select! {
+            result = read_packet(&mut socket) => {
+                match result {
+                    Ok(Some(IncomingPacket::Text(text))) => println!("{peer_nickname}: {text}"),
+                    Ok(Some(IncomingPacket::Image(bytes))) => println!("{peer_nickname} надіслав фото, {} байтів", bytes.len()),
+                    Ok(Some(IncomingPacket::Hello(_))) => { /* повторний hello під час сесії — ігноруємо */ }
+                    Ok(None) => { println!("{peer_nickname} відключився"); break; }
+                    Err(e) => { eprintln!("помилка читання від {peer_nickname}: {e}"); break; }
+                }
             }
-            Ok(Some(IncomingPacket::Image(bytes))) => {
-                println!("отримано фото, {} байтів", bytes.len());
-                // TODO: зберегти/показати
-            }
-            Ok(None) => {
-                println!("з'єднання закрито");
-                break;
-            }
-            Err(e) => {
-                eprintln!("помилка читання: {e}");
-                break;
+            Some(text) = rx.recv() => {
+                if let Err(e) = send_text(&mut socket, &text).await {
+                    eprintln!("помилка відправки до {peer_nickname}: {e}");
+                    break;
+                }
             }
         }
     }
+    manager.remove(&peer_nickname);
+}
+pub async fn handle_incoming(mut socket: TcpStream, addr: SocketAddr, manager: Arc<ConnectionManager>) {
+    match read_packet(&mut socket).await {
+        Ok(Some(IncomingPacket::Hello(nickname))) => {
+            handle_connection(socket, nickname, manager).await;
+        }
+        Ok(_) => eprintln!("з'єднання від {addr}: перший пакет не hello, закриваю"),
+        Err(e) => eprintln!("помилка читання hello від {addr}: {e}"),
+    }
 }
 
+pub async fn connect_to_peer(
+    addr: SocketAddr,
+    my_nickname: String,
+    peer_nickname: String,
+    manager: Arc<ConnectionManager>,
+) -> std::io::Result<()> {
+    let mut socket = TcpStream::connect(addr).await?;
+    send_hello(&mut socket, &my_nickname).await?;
+    tokio::spawn(handle_connection(socket, peer_nickname, manager));
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

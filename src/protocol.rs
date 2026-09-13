@@ -1,6 +1,8 @@
 pub const PACKET_ANNOUNCE: u8 = 0x01;
 pub const PACKET_TEXT: u8 = 0x02;
 pub const PACKET_IMAGE: u8 = 0x03;
+pub const PACKET_HELLO: u8 = 0x04;
+
 
 pub struct Announce{
     pub session_id: u64,

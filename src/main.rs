@@ -1,7 +1,9 @@
+pub mod ui;
 mod protocol;
 mod discovery;
 mod network;
 mod peer;
+
 
 use peer::PeerList;
 use protocol::Announce;
@@ -42,6 +44,7 @@ async fn main() -> std::io::Result<()> {
     let socket = discovery::setup_broadcast_soket(DISCOVERY_PORT).await?;
     let socket = Arc::new(socket);
     let peers = Arc::new(Mutex::new(PeerList::new()));
+    let manager = Arc::new(network::ConnectionManager::new());    
 
     let my_info = Announce {
         session_id,
@@ -62,8 +65,8 @@ async fn main() -> std::io::Result<()> {
     let listen_socket = socket.clone();
     let listen_peers = peers.clone();
     let listen_handle = tokio::spawn(discovery::listen_for_peers(listen_socket, listen_peers, session_id));
-    
-    let listener_handle = tokio::spawn(network::listener::run_server(tcp_port));
+     
+    let listener_handle = tokio::spawn(network::listener::run_server(tcp_port, manager.clone()));
 
     let _ = tokio::join!(announce_handle, listen_handle, listener_handle);
     Ok(())

@@ -1,8 +1,11 @@
-use crate::protocol::{Announce,encode_announce,decode_announce};
 use tokio::net::UdpSocket;
+
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+
+use crate::protocol::{Announce,encode_announce,decode_announce};
 use crate::peer::PeerList;
+use crate::network::ConnectionManager;
 
 pub async fn setup_broadcast_soket(port: u16) -> std::io::Result<UdpSocket> {
     let soket = UdpSocket::bind(("0.0.0.0", port)).await?;
@@ -19,7 +22,13 @@ pub async fn announce(soket: &UdpSocket, broadcast_port: u16, info: &Announce) -
 
 
 
-pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>, my_session_id: u64) {
+pub async fn listen_for_peers(
+    soket: Arc<UdpSocket>,
+    peers: Arc<Mutex<PeerList>>,
+    my_session_id: u64,
+    my_nickname: String,
+    connections: Arc<ConnectionManager>,
+) {
     let mut buf = [0u8; 512];
     loop {
         match soket.recv_from(&mut buf).await {
@@ -32,8 +41,15 @@ pub async fn listen_for_peers(soket: Arc<UdpSocket>, peers: Arc<Mutex<PeerList>>
                     };
 
                     if is_new && my_session_id > announce.session_id {
-                        // TODO: ініціювати TCP-з'єднання до цього піра
-                        println!("Новий пір {}, я ініціюю з'єднання", announce.nickname);
+                        let addr = SocketAddr::new(from.ip(), announce.tcp_port);
+                        let peer_nickname = announce.nickname.clone();
+                        let my_nick = my_nickname.clone();
+                        let mgr = connections.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::network::connection::connect_to_peer(addr, my_nick, peer_nickname, mgr).await {
+                                eprintln!("не вдалось підключитись: {e}");
+                            }
+                        });
                     }
                 }
             }
