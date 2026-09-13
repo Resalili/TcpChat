@@ -7,8 +7,11 @@ mod logger;
 
 use ui::AppEvent;
 use peer::PeerList;
-use protocol::Announce;
+use protocol::{Announce, Status};
+
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use std::time::Duration;
 use std::io::{self, Write};
 use tokio::sync::mpsc;
@@ -42,6 +45,8 @@ fn generate_session_id() -> u64 {
 async fn main() -> std::io::Result<()> {
     logger::init();
 
+    let my_status = Arc::new(AtomicU8::new(Status::Online.to_u8()));
+
     let (nickname, tcp_port) = register_user();
     let session_id = generate_session_id();
 
@@ -62,6 +67,7 @@ async fn main() -> std::io::Result<()> {
     let announce_socket = socket.clone();
     let announce_handle = tokio::spawn(async move {
         loop {
+            let status = my_status.load(Ordering::Relaxed);
             if let Err(e) = discovery::announce(&announce_socket, DISCOVERY_PORT, &my_info).await {
                 crate::error!("помилка announce: {e}");
             }
@@ -85,6 +91,19 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    let _ = tokio::join!(announce_handle, listen_handle, listener_handle, ui_handle);
+    let stale_peers = peers.clone();
+    let stale_manager = manager.clone();
+    let stale_handle = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let removed = stale_peers.lock().unwrap().remove_stale(Duration::from_secs(15));
+            for nick in removed {
+                info!("пір {nick} зник (немає анонсів)");
+                stale_manager.send_event(crate::ui::AppEvent::PeerLeft(nick));
+            }
+        }
+    });
+
+    let _ = tokio::join!(announce_handle, listen_handle, listener_handle, ui_handle,  stale_handle);
     Ok(())
 }

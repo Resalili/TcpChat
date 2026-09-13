@@ -9,10 +9,12 @@ use crossterm::event::{EventStream, Event as CEvent, KeyCode};
 use tokio_stream::StreamExt;
 use tokio::sync::mpsc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use crate::network::ConnectionManager;
+use crate::protocol::Status;
 
 pub enum AppEvent {
-    NewPeer(String),
+    PeerUpdate { nick: String, status: Status },
     PeerLeft(String),
     IncomingText { from: String, text: String },
     IncomingImage { from: String, size: usize },
@@ -27,6 +29,7 @@ pub enum Mode {
 
 pub struct App {
     pub chats: Vec<String>,
+    pub statuses: std::collections::HashMap<String, Status>,
     pub selected: usize,
     pub active: Option<usize>,
     pub messages: std::collections::HashMap<String, Vec<String>>,
@@ -39,6 +42,7 @@ impl App {
     pub fn new() -> Self {
         App {
             chats: Vec::new(),
+            statuses: std::collections::HashMap::new(),
             selected: 0,
             active: None,
             messages: std::collections::HashMap::new(),
@@ -50,26 +54,41 @@ impl App {
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::NewPeer(nick) => {
+            AppEvent::PeerUpdate { nick, status } => {
                 if !self.chats.contains(&nick) {
                     self.chats.push(nick.clone());
-                    self.messages.insert(nick, Vec::new());
+                    self.messages.insert(nick.clone(), Vec::new());
+                }
+                self.statuses.insert(nick, status);
+            }
+            AppEvent::PeerLeft(nick) => {
+                self.chats.retain(|n| n != &nick);
+                self.messages.remove(&nick);
+                self.statuses.remove(&nick);
+                if let Some(active_idx) = self.active {
+                    if self.chats.get(active_idx).map(|n| n == &nick).unwrap_or(true) {
+                        self.active = None;
+                    }
                 }
             }
             AppEvent::IncomingText { from, text } => {
-                self.messages.entry(from).or_default().push(text);
+                self.messages.entry(from.clone()).or_default().push(format!("{from}: {text}"));
             }
             AppEvent::IncomingImage { from, size } => {
                 self.messages.entry(from).or_default().push(format!("[фото, {size} байтів]"));
             }
-            AppEvent::ConnectionClosed(nick) | AppEvent::PeerLeft(nick) => {
-                let _ = nick; // поки що нічого не робимо, статус "офлайн" додамо пізніше
+            AppEvent::ConnectionClosed(nick) => {
+                self.messages.entry(nick).or_default().push("-- з'єднання розірвано --".to_string());
             }
         }
     }
 }
 
-pub async fn run(mut event_rx: mpsc::Receiver<AppEvent>, manager: Arc<ConnectionManager>) -> std::io::Result<()> {
+pub async fn run(
+    mut event_rx: mpsc::Receiver<AppEvent>,
+    manager: Arc<ConnectionManager>,
+    my_status: Arc<AtomicU8>,
+) -> std::io::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
@@ -80,17 +99,15 @@ pub async fn run(mut event_rx: mpsc::Receiver<AppEvent>, manager: Arc<Connection
     let mut key_events = EventStream::new();
 
     while !app.should_quit {
-        terminal.draw(|f| draw_ui(f, &app))?;
+        terminal.draw(|f| draw_ui(f, &app, &my_status))?;
 
         tokio::select! {
             Some(Ok(term_event)) = key_events.next() => {
                 if let CEvent::Key(key) = term_event {
                     if key.kind == crossterm::event::KeyEventKind::Press {
-                        handle_key(&mut app, key.code, &manager).await;
+                        handle_key(&mut app, key.code, &manager, &my_status).await;
                     }
                 }
-                // CEvent::Resize/Mouse/FocusGained тощо — нічого не робимо всередині,
-                // але сам факт спрацювання цієї гілки select! призведе до нового terminal.draw() на початку циклу
             }
             Some(event) = event_rx.recv() => {
                 app.handle_app_event(event);
@@ -103,10 +120,15 @@ pub async fn run(mut event_rx: mpsc::Receiver<AppEvent>, manager: Arc<Connection
     Ok(())
 }
 
-async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManager>) {
+async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManager>, my_status: &Arc<AtomicU8>) {
     match app.mode {
         Mode::Navigate => match code {
             KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('s') => {
+                let current = Status::from_u8(my_status.load(Ordering::Relaxed));
+                let next = current.next();
+                my_status.store(next.to_u8(), Ordering::Relaxed);
+            }
             KeyCode::Char('j') => {
                 if !app.chats.is_empty() {
                     app.selected = (app.selected + 1).min(app.chats.len() - 1);
@@ -149,21 +171,34 @@ async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManage
     }
 }
 
-fn draw_ui(f: &mut Frame, app: &App) {
+fn status_letter(status: Status) -> &'static str {
+    match status {
+        Status::Online => "[О]",
+        Status::Away => "[В]",
+        Status::Invisible => "[Н]",
+    }
+}
+
+fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(f.area());
 
     let items: Vec<ListItem> = app.chats.iter().enumerate().map(|(i, nick)| {
+        let status = app.statuses.get(nick).copied().unwrap_or(Status::Online);
+        let label = format!("{} {}", status_letter(status), nick);
         let style = if i == app.selected {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
             Style::default()
         };
-        ListItem::new(nick.as_str()).style(style)
+        ListItem::new(label).style(style)
     }).collect();
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Чати"));
+
+    let my_status_val = Status::from_u8(my_status.load(Ordering::Relaxed));
+    let list_title = format!("Чати (я: {}) — 's' змінити статус", status_letter(my_status_val));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(list_title));
     f.render_widget(list, chunks[0]);
 
     let right = Layout::default()

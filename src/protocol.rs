@@ -3,6 +3,38 @@ pub const PACKET_TEXT: u8 = 0x02;
 pub const PACKET_IMAGE: u8 = 0x03;
 pub const PACKET_HELLO: u8 = 0x04;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Online,
+    Away,
+    Invisible,
+}
+
+impl Status {
+    pub fn to_u8(self) -> u8 {
+        match self {
+            Status::Online => 0,
+            Status::Away => 1,
+            Status::Invisible => 2,
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Status {
+        match value {
+            1 => Status::Away,
+            2 => Status::Invisible,
+            _ => Status::Online, // невідоме значення теж трактуємо як Online — безпечний дефолт
+        }
+    }
+
+    pub fn next(self) -> Status {
+        match self {
+            Status::Online => Status::Away,
+            Status::Away => Status::Invisible,
+            Status::Invisible => Status::Online,
+        }
+    }
+}
 
 pub struct Announce{
     pub session_id: u64,

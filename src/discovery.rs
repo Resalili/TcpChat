@@ -3,9 +3,10 @@ use tokio::net::UdpSocket;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use crate::protocol::{Announce,encode_announce,decode_announce};
+use crate::protocol::{Status,Announce,encode_announce,decode_announce};
 use crate::peer::PeerList;
 use crate::network::ConnectionManager;
+
 
 pub async fn setup_broadcast_soket(port: u16) -> std::io::Result<UdpSocket> {
     let soket = UdpSocket::bind(("0.0.0.0", port)).await?;
@@ -39,9 +40,16 @@ pub async fn listen_for_peers(
                         let mut list = peers.lock().unwrap();
                         list.update(announce.session_id, announce.nickname.clone(), from, announce.tcp_port, announce.status)
                     };
+                    connections.send_event(crate::ui::AppEvent::PeerUpdate {
+                        nick: announce.nickname.clone(),
+                        status: Status::from_u8(announce.status),
+                    });
 
                     if is_new {
-                        connections.send_event(crate::ui::AppEvent::NewPeer(announce.nickname.clone()));
+                        connections.send_event(crate::ui::AppEvent::PeerUpdate {
+                            nick: announce.nickname.clone(),
+                            status: crate::protocol::Status::from_u8(announce.status),
+                        });
                     }
 
                     if is_new && my_session_id > announce.session_id {
