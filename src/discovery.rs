@@ -40,6 +40,10 @@ pub async fn listen_for_peers(
                         list.update(announce.session_id, announce.nickname.clone(), from, announce.tcp_port, announce.status)
                     };
 
+                    if is_new {
+                        connections.send_event(crate::ui::AppEvent::NewPeer(announce.nickname.clone()));
+                    }
+
                     if is_new && my_session_id > announce.session_id {
                         let addr = SocketAddr::new(from.ip(), announce.tcp_port);
                         let peer_nickname = announce.nickname.clone();
@@ -52,7 +56,7 @@ pub async fn listen_for_peers(
                         });
                     }
                 }
-            }
+        }
             Err(e) => eprintln!("помилка recv_from: {e}"),
         }
     }
