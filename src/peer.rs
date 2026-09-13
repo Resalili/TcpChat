@@ -33,8 +33,18 @@ impl PeerList {
         is_new
     }
 
-    pub fn remove_stale(&mut self, timeout: std::time::Duration) {
-        self.peers.retain(|_, peer| peer.last_seen.elapsed() < timeout);
+    pub fn remove_stale(&mut self, timeout: std::time::Duration) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let stale: Vec<String> = self.peers.iter()
+            .filter(|(_, peer)| now.duration_since(peer.last_seen) > timeout)
+            .map(|(nick, _)| nick.clone())
+            .collect();
+
+        for nick in &stale {
+            self.peers.remove(nick);
+        }
+
+        stale
     }
 
     pub fn list(&self) -> impl Iterator<Item = &Peer> {
