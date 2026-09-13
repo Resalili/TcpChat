@@ -4,14 +4,24 @@ pub mod connection;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
+use crate::ui::AppEvent;
 
 pub struct ConnectionManager {
     connections: Mutex<HashMap<String, mpsc::Sender<String>>>,
+    event_tx: mpsc::Sender<AppEvent>,
 }
 
 impl ConnectionManager {
-    pub fn new() -> Self {
-        ConnectionManager { connections: Mutex::new(HashMap::new()) }
+    pub fn new(event_tx: mpsc::Sender<AppEvent>) -> Self {
+        ConnectionManager {
+            connections: Mutex::new(HashMap::new()),
+            event_tx,
+        }
+    }
+
+    pub fn send_event(&self, event: AppEvent) {
+        // ігноруємо помилку: якщо TUI вже закрився, надсилати подію нікуди
+        let _ = self.event_tx.try_send(event);
     }
 
     pub fn has_connection(&self, nickname: &str) -> bool {
@@ -42,26 +52,32 @@ impl ConnectionManager {
 mod tests {
     use super::*;
 
+    // допоміжна функція: створює менеджер з каналом подій, який тест може ігнорувати
+    fn test_manager() -> ConnectionManager {
+        let (event_tx, _event_rx) = mpsc::channel::<AppEvent>(16);
+        ConnectionManager::new(event_tx)
+    }
+
     #[test]
     fn no_connection_by_default() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
         assert!(!manager.has_connection("Bob"));
     }
 
     #[test]
     fn add_and_has_connection() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
         let (tx, _rx) = mpsc::channel::<String>(1);
 
         manager.add("Bob".to_string(), tx);
 
         assert!(manager.has_connection("Bob"));
-        assert!(!manager.has_connection("Alice")); // інший нік — не повинен з'явитись
+        assert!(!manager.has_connection("Alice"));
     }
 
     #[test]
     fn remove_connection() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
         let (tx, _rx) = mpsc::channel::<String>(1);
 
         manager.add("Bob".to_string(), tx);
@@ -73,7 +89,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_existing_connection_delivers_message() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
         let (tx, mut rx) = mpsc::channel::<String>(1);
 
         manager.add("Bob".to_string(), tx);
@@ -87,7 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_unknown_peer_returns_error() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
 
         let result = manager.send_to("Ghost", "привіт".to_string()).await;
         assert!(result.is_err());
@@ -95,11 +111,11 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_closed_channel_returns_error() {
-        let manager = ConnectionManager::new();
+        let manager = test_manager();
         let (tx, rx) = mpsc::channel::<String>(1);
 
         manager.add("Bob".to_string(), tx);
-        drop(rx); // отримувач закрився — канал "мертвий" з боку відправника
+        drop(rx);
 
         let result = manager.send_to("Bob", "привіт".to_string()).await;
         assert!(result.is_err());
