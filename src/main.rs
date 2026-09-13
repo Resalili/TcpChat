@@ -3,6 +3,7 @@ mod protocol;
 mod discovery;
 mod network;
 mod peer;
+mod logger;
 
 use ui::AppEvent;
 use peer::PeerList;
@@ -39,6 +40,8 @@ fn generate_session_id() -> u64 {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    logger::init();
+
     let (nickname, tcp_port) = register_user();
     let session_id = generate_session_id();
 
@@ -60,7 +63,7 @@ async fn main() -> std::io::Result<()> {
     let announce_handle = tokio::spawn(async move {
         loop {
             if let Err(e) = discovery::announce(&announce_socket, DISCOVERY_PORT, &my_info).await {
-                eprintln!("помилка announce: {e}");
+                crate::error!("помилка announce: {e}");
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -78,7 +81,7 @@ async fn main() -> std::io::Result<()> {
     let ui_manager = manager.clone();
     let ui_handle = tokio::spawn(async move {
         if let Err(e) = ui::run(event_rx, ui_manager).await {
-            eprintln!("помилка UI: {e}");
+            crate::error!("помилка UI: {e}");
         }
     });
 

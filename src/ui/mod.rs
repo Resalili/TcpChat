@@ -134,7 +134,7 @@ async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManage
                         let mgr = manager.clone();
                         tokio::spawn(async move {
                             if let Err(e) = mgr.send_to(&nickname, text).await {
-                                eprintln!("не вдалось надіслати: {e}");
+                                crate::error!("не вдалось надіслати: {e}");
                             }
                         });
                     }

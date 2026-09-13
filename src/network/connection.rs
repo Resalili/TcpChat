@@ -42,7 +42,7 @@ async fn read_packet(socket: &mut TcpStream) -> std::io::Result<Option<IncomingP
         }
         PACKET_IMAGE => Ok(Some(IncomingPacket::Image(body))),
         _ => {
-            eprintln!("невідомий тип пакета: {packet_type}");
+            crate::error!("невідомий тип пакета: {packet_type}");
             Ok(None) // або продовжити цикл і читати наступний пакет — залежно від бажаної поведінки
         }
     }
@@ -73,16 +73,16 @@ pub async fn handle_connection(mut socket: TcpStream, peer_nickname: String, man
         tokio::select! {
             result = read_packet(&mut socket) => {
                 match result {
-                    Ok(Some(IncomingPacket::Text(text))) => println!("{peer_nickname}: {text}"),
-                    Ok(Some(IncomingPacket::Image(bytes))) => println!("{peer_nickname} надіслав фото, {} байтів", bytes.len()),
+                    Ok(Some(IncomingPacket::Text(text))) => crate::info!("{peer_nickname}: {text}"),
+                    Ok(Some(IncomingPacket::Image(bytes))) => crate::info!("{peer_nickname} надіслав фото, {} байтів", bytes.len()),
                     Ok(Some(IncomingPacket::Hello(_))) => { /* повторний hello під час сесії — ігноруємо */ }
-                    Ok(None) => { println!("{peer_nickname} відключився"); break; }
-                    Err(e) => { eprintln!("помилка читання від {peer_nickname}: {e}"); break; }
+                    Ok(None) => { crate::info!("{peer_nickname} відключився"); break; }
+                    Err(e) => { crate::error!("помилка читання від {peer_nickname}: {e}"); break; }
                 }
             }
             Some(text) = rx.recv() => {
                 if let Err(e) = send_text(&mut socket, &text).await {
-                    eprintln!("помилка відправки до {peer_nickname}: {e}");
+                    crate::error!("помилка відправки до {peer_nickname}: {e}");
                     break;
                 }
             }
@@ -95,8 +95,8 @@ pub async fn handle_incoming(mut socket: TcpStream, addr: SocketAddr, manager: A
         Ok(Some(IncomingPacket::Hello(nickname))) => {
             handle_connection(socket, nickname, manager).await;
         }
-        Ok(_) => eprintln!("з'єднання від {addr}: перший пакет не hello, закриваю"),
-        Err(e) => eprintln!("помилка читання hello від {addr}: {e}"),
+        Ok(_) => crate::error!("з'єднання від {addr}: перший пакет не hello, закриваю"),
+        Err(e) => crate::error!("помилка читання hello від {addr}: {e}"),
     }
 }
 

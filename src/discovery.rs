@@ -51,13 +51,13 @@ pub async fn listen_for_peers(
                         let mgr = connections.clone();
                         tokio::spawn(async move {
                             if let Err(e) = crate::network::connection::connect_to_peer(addr, my_nick, peer_nickname, mgr).await {
-                                eprintln!("не вдалось підключитись: {e}");
+                                crate::error!("не вдалось підключитись: {e}");
                             }
                         });
                     }
                 }
         }
-            Err(e) => eprintln!("помилка recv_from: {e}"),
+            Err(e) => crate::error!("помилка recv_from: {e}"),
         }
     }
 }
