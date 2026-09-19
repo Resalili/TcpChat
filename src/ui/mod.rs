@@ -11,6 +11,19 @@ use tokio_stream::StreamExt;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use ratatui::{
+    Terminal, Frame,
+    backend::CrosstermBackend,
+    layout::{Layout, Direction, Constraint},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    style::{Style, Modifier, Color},
+    text::{Line, Span},
+};
+use crossterm::event::{EventStream, Event as CEvent, KeyCode};
+use tokio_stream::StreamExt;
+use tokio::sync::mpsc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::collections::HashMap;
 use crate::network::ConnectionManager;
 use crate::protocol::Status;
@@ -218,14 +231,6 @@ fn status_color(status: Status) -> Color {
     }
 }
 
-fn status_letter(status: Status) -> &'static str {
-    match status {
-        Status::Online => "[О]",
-        Status::Away => "[В]",
-        Status::Invisible => "[Н]",
-    }
-}
-
 fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -242,11 +247,11 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
         let unread = app.unread.get(nick).copied().unwrap_or(0);
 
         let mut spans = vec![
-            Span::styled(status_letter(status), Style::default().fg(status_color(status))),
-            Span::raw(format!(" {nick}")),
+            Span::styled("● ", Style::default().fg(status_color(status))),
+            Span::raw(nick.clone()),
         ];
         if unread > 0 {
-            spans.push(Span::styled(format!("  ●{unread}"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(format!("  ({unread})"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
         }
 
         let base_style = if i == app.selected {
@@ -257,11 +262,16 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
         ListItem::new(Line::from(spans)).style(base_style)
     }).collect();
 
+    let my_status_val = Status::from_u8(my_status.load(Ordering::Relaxed));
+    let list_title = Line::from(vec![
+        Span::raw("Чати "),
+        Span::styled("●", Style::default().fg(status_color(my_status_val))),
+    ]);
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(if list_focused { focused_border } else { normal_border })
-            .title("Чати")
+            .title(list_title)
     );
     f.render_widget(list, chunks[0]);
 
@@ -314,6 +324,4 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
     };
     let hint_bar = Paragraph::new(hint).style(Style::default().fg(Color::DarkGray));
     f.render_widget(hint_bar, right[2]);
-
-    let _ = my_status; // статус уже показаний у списку зліва як self, якщо додаси окремий рядок — прибери це
 }
