@@ -2,14 +2,16 @@ use ratatui::{
     Terminal, Frame,
     backend::CrosstermBackend,
     layout::{Layout, Direction, Constraint},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    style::{Style, Modifier},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    style::{Style, Modifier, Color},
+    text::{Line, Span},
 };
 use crossterm::event::{EventStream, Event as CEvent, KeyCode};
 use tokio_stream::StreamExt;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::collections::HashMap;
 use crate::network::ConnectionManager;
 use crate::protocol::Status;
 
@@ -27,12 +29,24 @@ pub enum Mode {
     Chatting,
 }
 
+pub enum LineKind {
+    Own,
+    Incoming,
+    System,
+}
+
+pub struct ChatLine {
+    pub text: String,
+    pub kind: LineKind,
+}
+
 pub struct App {
     pub chats: Vec<String>,
-    pub statuses: std::collections::HashMap<String, Status>,
+    pub statuses: HashMap<String, Status>,
+    pub unread: HashMap<String, usize>,
     pub selected: usize,
     pub active: Option<usize>,
-    pub messages: std::collections::HashMap<String, Vec<String>>,
+    pub messages: HashMap<String, Vec<ChatLine>>,
     pub input: String,
     pub mode: Mode,
     pub should_quit: bool,
@@ -42,10 +56,11 @@ impl App {
     pub fn new() -> Self {
         App {
             chats: Vec::new(),
-            statuses: std::collections::HashMap::new(),
+            statuses: HashMap::new(),
+            unread: HashMap::new(),
             selected: 0,
             active: None,
-            messages: std::collections::HashMap::new(),
+            messages: HashMap::new(),
             input: String::new(),
             mode: Mode::Navigate,
             should_quit: false,
@@ -65,6 +80,7 @@ impl App {
                 self.chats.retain(|n| n != &nick);
                 self.messages.remove(&nick);
                 self.statuses.remove(&nick);
+                self.unread.remove(&nick);
                 if let Some(active_idx) = self.active {
                     if self.chats.get(active_idx).map(|n| n == &nick).unwrap_or(true) {
                         self.active = None;
@@ -72,13 +88,30 @@ impl App {
                 }
             }
             AppEvent::IncomingText { from, text } => {
-                self.messages.entry(from.clone()).or_default().push(format!("{from}: {text}"));
+                let currently_open = self.active.and_then(|i| self.chats.get(i)) == Some(&from);
+                if !currently_open {
+                    *self.unread.entry(from.clone()).or_insert(0) += 1;
+                }
+                self.messages.entry(from.clone()).or_default().push(ChatLine {
+                    text: format!("{from}: {text}"),
+                    kind: LineKind::Incoming,
+                });
             }
             AppEvent::IncomingImage { from, size } => {
-                self.messages.entry(from).or_default().push(format!("[фото, {size} байтів]"));
+                let currently_open = self.active.and_then(|i| self.chats.get(i)) == Some(&from);
+                if !currently_open {
+                    *self.unread.entry(from.clone()).or_insert(0) += 1;
+                }
+                self.messages.entry(from.clone()).or_default().push(ChatLine {
+                    text: format!("{from}: [фото, {size} байтів]"),
+                    kind: LineKind::Incoming,
+                });
             }
             AppEvent::ConnectionClosed(nick) => {
-                self.messages.entry(nick).or_default().push("-- з'єднання розірвано --".to_string());
+                self.messages.entry(nick).or_default().push(ChatLine {
+                    text: "-- з'єднання розірвано --".to_string(),
+                    kind: LineKind::System,
+                });
             }
         }
     }
@@ -141,6 +174,9 @@ async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManage
                 if !app.chats.is_empty() {
                     app.active = Some(app.selected);
                     app.mode = Mode::Chatting;
+                    if let Some(nick) = app.chats.get(app.selected) {
+                        app.unread.remove(nick);
+                    }
                 }
             }
             _ => {}
@@ -154,7 +190,10 @@ async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManage
                     let nickname = app.chats[idx].clone();
                     let text = std::mem::take(&mut app.input);
                     if !text.is_empty() {
-                        app.messages.entry(nickname.clone()).or_default().push(format!("я: {text}"));
+                        app.messages.entry(nickname.clone()).or_default().push(ChatLine {
+                            text: format!("я: {text}"),
+                            kind: LineKind::Own,
+                        });
                         let mgr = manager.clone();
                         tokio::spawn(async move {
                             if let Err(e) = mgr.send_to(&nickname, text).await {
@@ -168,6 +207,14 @@ async fn handle_key(app: &mut App, code: KeyCode, manager: &Arc<ConnectionManage
             KeyCode::Backspace => { app.input.pop(); }
             _ => {}
         },
+    }
+}
+
+fn status_color(status: Status) -> Color {
+    match status {
+        Status::Online => Color::Green,
+        Status::Away => Color::Yellow,
+        Status::Invisible => Color::DarkGray,
     }
 }
 
@@ -185,33 +232,65 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(f.area());
 
+    let list_focused = app.mode == Mode::Navigate;
+    let chat_focused = app.mode == Mode::Chatting;
+    let focused_border = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let normal_border = Style::default();
+
     let items: Vec<ListItem> = app.chats.iter().enumerate().map(|(i, nick)| {
         let status = app.statuses.get(nick).copied().unwrap_or(Status::Online);
-        let label = format!("{} {}", status_letter(status), nick);
-        let style = if i == app.selected {
+        let unread = app.unread.get(nick).copied().unwrap_or(0);
+
+        let mut spans = vec![
+            Span::styled(status_letter(status), Style::default().fg(status_color(status))),
+            Span::raw(format!(" {nick}")),
+        ];
+        if unread > 0 {
+            spans.push(Span::styled(format!("  ●{unread}"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+        }
+
+        let base_style = if i == app.selected {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
             Style::default()
         };
-        ListItem::new(label).style(style)
+        ListItem::new(Line::from(spans)).style(base_style)
     }).collect();
 
-    let my_status_val = Status::from_u8(my_status.load(Ordering::Relaxed));
-    let list_title = format!("Чати (я: {}) — 's' змінити статус", status_letter(my_status_val));
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(list_title));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(if list_focused { focused_border } else { normal_border })
+            .title("Чати")
+    );
     f.render_widget(list, chunks[0]);
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .constraints([Constraint::Min(1), Constraint::Length(3), Constraint::Length(1)])
         .split(chunks[1]);
 
     let title = app.active.map(|i| app.chats[i].as_str()).unwrap_or("(нема активного чату)");
-    let body = app.active
+    let lines: Vec<Line> = app.active
         .and_then(|i| app.messages.get(&app.chats[i]))
-        .map(|msgs| msgs.join("\n"))
+        .map(|msgs| msgs.iter().map(|line| {
+            let color = match line.kind {
+                LineKind::Own => Color::Cyan,
+                LineKind::Incoming => Color::White,
+                LineKind::System => Color::DarkGray,
+            };
+            Line::styled(line.text.clone(), Style::default().fg(color))
+        }).collect())
         .unwrap_or_default();
-    let chat_view = Paragraph::new(body).block(Block::default().borders(Borders::ALL).title(title));
+
+    let chat_view = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if chat_focused { focused_border } else { normal_border })
+                .title(title)
+        );
     f.render_widget(chat_view, right[0]);
 
     let input_style = if app.mode == Mode::Chatting {
@@ -221,6 +300,20 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
     };
     let input = Paragraph::new(app.input.as_str())
         .style(input_style)
-        .block(Block::default().borders(Borders::ALL).title("Ввід (Enter — надіслати, Esc — до списку)"));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if chat_focused { focused_border } else { normal_border })
+                .title("Ввід")
+        );
     f.render_widget(input, right[1]);
+
+    let hint = match app.mode {
+        Mode::Navigate => "j/k: рух  Enter: відкрити чат  s: змінити статус  q: вихід",
+        Mode::Chatting => "Enter: надіслати  Esc: до списку чатів",
+    };
+    let hint_bar = Paragraph::new(hint).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(hint_bar, right[2]);
+
+    let _ = my_status; // статус уже показаний у списку зліва як self, якщо додаси окремий рядок — прибери це
 }
