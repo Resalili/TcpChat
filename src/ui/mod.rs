@@ -234,9 +234,9 @@ fn draw_ui(f: &mut Frame, app: &App, my_status: &Arc<AtomicU8>) {
         let unread = app.unread.get(nick).copied().unwrap_or(0);
 
         let mut spans = vec![
-            Span::styled("● ", Style::default().fg(status_color(status))),
-            Span::raw(nick.clone()),
+            Span::styled(nick.clone(), Style::default().fg(status_color(status)).add_modifier(Modifier::BOLD)),
         ];
+
         if unread > 0 {
             spans.push(Span::styled(format!("  ({unread})"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
         }
