@@ -36,6 +36,7 @@ pub async fn listen_for_peers(
             Ok((n, from)) => {
                 let data = &buf[..n];
                 if let Some(announce) = decode_announce(data) {
+                    if announce.session_id == my_session_id { continue; } // Ігноруємо власний пакет
                     let is_new = {
                         let mut list = peers.lock().unwrap();
                         list.update(announce.session_id, announce.nickname.clone(), from, announce.tcp_port, announce.status)
