@@ -11,19 +11,6 @@ use tokio_stream::StreamExt;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use ratatui::{
-    Terminal, Frame,
-    backend::CrosstermBackend,
-    layout::{Layout, Direction, Constraint},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    style::{Style, Modifier, Color},
-    text::{Line, Span},
-};
-use crossterm::event::{EventStream, Event as CEvent, KeyCode};
-use tokio_stream::StreamExt;
-use tokio::sync::mpsc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::collections::HashMap;
 use crate::network::ConnectionManager;
 use crate::protocol::Status;
