@@ -1,6 +1,6 @@
 use tokio::net::UdpSocket;
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::{Status,Announce,encode_announce,decode_announce};
@@ -8,15 +8,17 @@ use crate::peer::PeerList;
 use crate::network::ConnectionManager;
 
 
+const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239,255,0,1);
+
 pub async fn setup_broadcast_soket(port: u16) -> std::io::Result<UdpSocket> {
     let soket = UdpSocket::bind(("0.0.0.0", port)).await?;
-    soket.set_broadcast(true)?;
+    soket.join_multicast_v4(MULTICAST_ADDR, Ipv4Addr::UNSPECIFIED)?;
     Ok(soket)
 }
 
 pub async fn announce(soket: &UdpSocket, broadcast_port: u16, info: &Announce) -> std::io::Result<()> {
     let bytes = encode_announce(info);
-    let addr: SocketAddr = format!("255.255.255.255:{broadcast_port}").parse().unwrap();
+    let addr: SocketAddr = SocketAddr::new(MULTICAST_ADDR.into(), broadcast_port);
     soket.send_to(&bytes, addr).await?;
     Ok(())
 }
